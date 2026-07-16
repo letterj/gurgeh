@@ -7,3 +7,7 @@ Key Breakthroughs:
 - Resilient Distributed Compute Fabric
 
 See AGENTS.md for full details.
+
+Repo: https://github.com/letterj/Gurgeh
+Docs in /docs/ directory.
+Development follows branch/PR process.
