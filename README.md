@@ -1,2 +1,8 @@
 # Gurgeh
-Erlang-based agent harness for multi-model AI consensus and distributed local compute fabric
+
+Erlang agent harness for advanced local AI systems.
+
+## Overview
+Based on actor model for parallelism and distribution.
+
+See instruction.md for project goals.
