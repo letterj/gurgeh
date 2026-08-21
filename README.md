@@ -1,6 +1,1 @@
-# Gurgeh
-
-Erlang agent harness for advanced local AI systems.
-
-## Overview
-Based on actor model for parallelism and distribution.
+Infrastructure to work on a simulated mission to the moon where we have a craft launch into Earth's orbit. flies to the moon, eject a bucket to land on the moon's surface to scoop up 100kg of regolith, the main craft uses a skyhook to grab the bucket on the next orbit,  Once the regolith is retrieved then it returns back to the Earth
