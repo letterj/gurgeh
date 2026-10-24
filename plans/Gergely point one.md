@@ -23,7 +23,7 @@ Jay locked the following for this slice:
    5. Determine its position.
    6. Do three orbits.
    7. Do a controlled de-orbit burn.
-5. **Attitude control.** The CubeSat must be able to maneuver and turn. It takes input (commands). Model attitude with reaction wheels or magnetorquers. Magnetorquers are the first pick for a CubeSat this size. Earth pointing is the early priority, for the ground link and the position fix. Moon pointing is a later attitude mode.
+5. **Attitude control.** The CubeSat must be able to maneuver and turn. It takes input (commands). Model attitude with magnetorquers only. Earth pointing is the early priority, for the ground link and the position fix. Moon pointing is a later attitude mode.
 6. **Tests.** The test plan covers every one of the seven behaviors plus the attitude-control model. Each item has a test approach: level, nominal pass criteria, fault cases, and expected safe-mode or retry behavior.
 7. **Logging.** Comprehensive logging is required. It is not optional. It cannot be turned off. The simulator logs everything with timestamps to a file that can be tailed live from a macOS terminal.
 8. **Log format.** The log format is JSON lines (JSONL): one JSON object per line. Use a `.jsonl` file extension.
@@ -129,7 +129,7 @@ Task names, priorities, and periods below are **Proposed**. They are a starting 
 | --- | --- | --- | --- | --- |
 | `ModeManager` | Sequence the seven steps. Enforce prerequisites. Own the mode state machine. Enter and leave safe mode. | 1 (highest application priority) | Event-driven; 100 ms poll as a backstop | Single writer of step state |
 | `HealthMonitor` | Watch task heartbeats, raise faults, request safe mode | 2 | 100 ms | Does not command actuators directly |
-| `AttitudeControl` | Detumble, point, accept attitude commands | 3 | 10–50 ms | First pick: magnetorquers |
+| `AttitudeControl` | Detumble, point, accept attitude commands | 3 | 10–50 ms | Magnetorquers only |
 | `PowerMonitor` | Solar-panel state, battery energy, eclipse flag | 4 | 1 s | Feeds step 2 and safe-mode power rules |
 | `Propulsion` | Tank pressure, valve response, burn start/stop | 4 | 100 ms when armed; 1 s otherwise | Trusted for burn only after step 3 passes |
 | `CommsCheck` | Antenna health and simulated ground-contact flag | 5 | 1 s | No NOS3 link in this slice |
@@ -186,9 +186,9 @@ The CubeSat must maneuver and turn. Attitude takes input (commands) from the CLI
 
 ### Actuators
 
-Model the plant with **reaction wheels or magnetorquers**. Jay named magnetorquers as the first pick for a CubeSat this size.
+Model the plant with **magnetorquers only**. Jay locked this actuator choice.
 
-**Proposed** first implementation: three-axis magnetorquers plus a simple magnetic-field model. Keep a reaction-wheel model as a switchable option for saturation and wheel-failure tests. Do not invent motor or dipole ratings here. Hardware numbers are **to verify**.
+**Proposed** implementation: three-axis magnetorquers plus a simple magnetic-field model. Do not invent dipole ratings here. Hardware numbers are **to verify**.
 
 ### Sensors
 
@@ -220,7 +220,7 @@ Keep the environment simple enough to drive the seven steps and the tests. Fidel
 | Power | Array current when the Sun flag is on and panels are healthy; battery integrator; low-power fault | Steps 2 and 6, safe mode |
 | Propellant | Tank pressure state; valve open/closed/stuck; a burn that spends propellant and applies delta-v | Steps 3 and 7 |
 | De-orbit criterion | After the burn, altitude or remaining-lifetime proxy drops through a pass threshold | Step 7 pass/fail |
-| Attitude plant | Rigid body with magnetorquer (or wheel) torque and a simple disturbance | All pointing modes |
+| Attitude plant | Rigid body with magnetorquer torque and a simple disturbance | All pointing modes |
 
 Do not add a high-fidelity atmosphere, a full gravity-gradient stack, or a real TLE propagator unless a later decision says so.
 
@@ -340,7 +340,7 @@ Tooling for running tests is **Proposed**. See [How tests run in Docker on macOS
 | 5. Position | Unit, task, end-to-end | `step.position.pass`; fix valid | Bad fix; timeout; pointing off Earth | Retry while Earth-pointing; then safe mode |
 | 6. Three orbits | Task, end-to-end | Three `orbit.start` / `orbit.end` pairs; `step.orbits.pass`; count 3 | Power fault in eclipse; attitude loss | Abort count; safe mode; no burn |
 | 7. Controlled de-orbit burn | Unit, task, end-to-end | `burn.start`, duration, delta-v, `step.deorbit.pass` | Burn with failed prop check (must refuse); wrong attitude; aborted burn | Refuse or abort; valve closed; safe mode |
-| Attitude control | Unit, task, end-to-end | Command logged; detumble; Earth-pointing within error; burn-pointing held | Wheel failure or saturation; magnetorquer off; reject Moon mode if gated | Hold or detumble; safe mode if pointing is required and cannot be met |
+| Attitude control | Unit, task, end-to-end | Command logged; detumble; Earth-pointing within error; burn-pointing held | Stuck or failed magnetorquer; magnetometer fault; reject Moon mode if gated | Hold or detumble; safe mode if pointing is required and cannot be met |
 
 ### 1. Wake up after deployment
 
@@ -395,8 +395,8 @@ Tooling for running tests is **Proposed**. See [How tests run in Docker on macOS
 
 - **Levels:** unit for the plant and mode logic; task/integration for command input and mode changes; end-to-end during steps 1, 4, 5, and 7.
 - **Nominal:** a command is logged as input and as result. Detumble reduces rate. Earth-pointing stays within the error limit for the antenna and position steps. Burn-pointing holds through the burn. Moon pointing is accepted only as a later mode when that gate is open.
-- **Faults:** reaction-wheel failure or saturation (when the wheel model is enabled); magnetorquer failed-off; a command for Moon pointing while the later-mode gate is closed; inability to hold Earth-pointing or burn-pointing.
-- **Expected:** reject illegal commands and log the rejection. On actuator fault, try the remaining actuator model if both exist; otherwise detumble or hold and raise a fault. If a required pointing mode cannot be met, the current step fails and the mode manager enters safe mode.
+- **Faults:** a stuck or failed magnetorquer; a magnetometer fault; a command for Moon pointing while the later-mode gate is closed; inability to hold Earth-pointing or burn-pointing.
+- **Expected:** reject illegal commands and log the rejection. On magnetorquer or magnetometer fault, detumble or hold and raise a fault. If a required pointing mode cannot be met, the current step fails and the mode manager enters safe mode.
 
 ### End-to-end mission test
 
@@ -458,14 +458,14 @@ Each milestone is small. Verification is listed. When code exists, every code pu
 | M4 | Propellant check and burn gate | Pass sets `trusted_for_burn`; low pressure or stuck valve blocks `deorbit` |
 | M5 | Antenna check and position fix with Earth-pointing | Both pass only while pointing is within limit; bad fix fails |
 | M6 | Three-orbit run with eclipse and power | Count reaches 3; orbit events in the log |
-| M7 | Attitude modes: detumble, Earth-pointing, burn-pointing; command input | Unit and task tests; wheel or magnetorquer fault case |
+| M7 | Attitude modes: detumble, Earth-pointing, burn-pointing; command input | Unit and task tests; stuck or failed magnetorquer; magnetometer fault |
 | M8 | Controlled de-orbit burn and criterion | Nominal burn passes; abort and refuse cases |
 | M9 | `gergely run` end-to-end plus the fault end-to-end | Test plan section above is green in Docker on macOS |
 | M10 | Phase-two seam note only: contact flag isolated | No NOS3 containers yet; interface documented in code comments when they exist |
 
 ## Open questions and decisions
 
-Each item still open has a recommended default. Questions that the decisions section already answered (host, Docker, seven-step order, no NOS3 in this slice, required JSONL logging, CLI rather than a dashboard) are not listed again.
+Each item still open has a recommended default. Questions that the decisions section already answered (host, Docker, seven-step order, no NOS3 in this slice, magnetorquers-only attitude actuators, required JSONL logging, CLI rather than a dashboard) are not listed again.
 
 | ID | Question | Recommended default |
 | --- | --- | --- |
@@ -474,10 +474,9 @@ Each item still open has a recommended default. Questions that the decisions sec
 | Q3 | Image architecture on Apple Silicon? | Native `arm64`, with `amd64` documented as emulated |
 | Q4 | Base image and tag? | A current official slim Linux image; name and tag **to verify** |
 | Q5 | Mission-clock rate? | Real-time first; optional modest speed-up for three orbits, factor **to verify** |
-| Q6 | Magnetorquers first, wheels first, or both models? | Magnetorquers first, as Jay's first pick; wheels available for fault tests |
-| Q7 | Orbit altitude and de-orbit pass threshold? | A single LEO altitude parameter and a simple altitude-drop criterion; numbers **to verify** |
-| Q8 | CLI binary name? | `gergely` |
-| Q9 | Test runner inside the container? | Drive the real CLI and assert JSONL; framework **to verify** |
-| Q10 | Phase-two transport and ground client? | Decide in phase two; keep only a contact-flag seam now |
-| Q11 | Log field names and `mission_time` unit? | Fields in the Logging table; seconds from wake-up |
-| Q12 | Bind-mount path and run file name? | Host `logs/gergely-<run-id>.jsonl`; `logs/` git-ignored when code lands |
+| Q6 | Orbit altitude and de-orbit pass threshold? | A single LEO altitude parameter and a simple altitude-drop criterion; numbers **to verify** |
+| Q7 | CLI binary name? | `gergely` |
+| Q8 | Test runner inside the container? | Drive the real CLI and assert JSONL; framework **to verify** |
+| Q9 | Phase-two transport and ground client? | Decide in phase two; keep only a contact-flag seam now |
+| Q10 | Log field names and `mission_time` unit? | Fields in the Logging table; seconds from wake-up |
+| Q11 | Bind-mount path and run file name? | Host `logs/gergely-<run-id>.jsonl`; `logs/` git-ignored when code lands |
